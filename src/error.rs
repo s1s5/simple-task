@@ -14,10 +14,6 @@ pub enum Error {
     InvalidSlug(String),
     #[error("MCP サーバーエラー: {0}")]
     Mcp(String),
-    #[error("worker の実行に失敗しました: {0}")]
-    Handoff(String),
-    #[error("worker がタイムアウトしました（{0} 秒）")]
-    Timeout(u64),
     #[error("IO エラー: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON エラー: {0}")]

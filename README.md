@@ -1,8 +1,7 @@
 # simple-task
 
-タスクを登録し、そのまま `worker` エージェントへ渡す Rust 製 MCP サーバー。
-planner が MCP ツール `create_task` でタスクを積むと、`worker` が `get_task` で content を取得して実行し、
-その結果が同期レスポンスとして返る。
+**タスク内容をファイルに保存・取得するだけ**の Rust 製 MCP サーバー。
+worker の起動は OpenClaw の正規ルート（planner の `sessions_spawn`）で行う。MCP はプロセスを一切起動しない。
 
 - タスクは **`slug` + `content` のみ**（状態管理はしない）
 - 永続化: **`~/.config/simple-task/<slug>.md`（1 タスク = 1 ファイル）**
@@ -10,6 +9,23 @@ planner が MCP ツール `create_task` でタスクを積むと、`worker` が 
 - MCP は **stdio**
 
 worker にはファイルパスを一切渡さない。worker は MCP の `get_task(slug)` で content を取得する。
+
+## 正しい流れ
+
+```
+planner
+  ① MCP create_task(slug, content)      → ファイル作成のみ。即返る（実行も起動もしない）
+  ② sessions_spawn(agentId="worker",
+       task="<slug> のタスクを get_task で取得し、その content に従って実行せよ")
+                                        ← OpenClaw の正規ルート
+worker
+  ③ MCP get_task(slug)                  → content を取得
+  ④ 実行
+```
+
+- MCP は ①②③ の**内容の受け渡しだけ**。`openclaw agent` の子プロセス起動は行わない
+- per-agent の権限分離は `tools.deny` では不可能（planner の deny が spawn 子へ継承されるため）。
+  利用者の分担は **AGENTS.md の規律（ソフト制約）** で行う
 
 ## ビルドと配置
 
@@ -35,11 +51,11 @@ install -m 755 target/release/simple-task ~/.local/bin/simple-task
 
 | ツール | 入力 | 出力 | 利用者 |
 |---|---|---|---|
-| `create_task` | `slug: String`, `content: String` | `{ slug, result }` | planner |
+| `create_task` | `slug: String`, `content: String` | `{ slug }` | planner |
 | `get_task` | `slug: String` | `{ slug, content }` | worker |
 | `list_tasks` | なし | `{ slugs: [String] }` | worker |
 
-`create_task` は**同期**。worker の最終出力を `result` として返す。タスクファイルは書き換えない。
+`create_task` は**ファイルを書いて即返る**（worker の完了を待たない。プロセスも起動しない）。
 **どのツールの出力にも絶対パスを含めない。**
 
 ## slug の検証
@@ -59,34 +75,15 @@ openclaw mcp status
 openclaw mcp probe simple-task
 ```
 
-per-agent の権限配分（planner に `create_task` のみ / worker に `get_task`・`list_tasks` のみ）は
-`openclaw mcp tools` で調整する。詳細はプラン §10 を参照。
+利用者の分担（planner = `create_task` / worker = `get_task`・`list_tasks`）は各エージェントの
+`AGENTS.md` の規律で運用する。詳細はプラン §7 を参照。
 
 ## 環境変数
 
 | 変数 | 既定 | 内容 |
 |---|---|---|
-| `SIMPLE_TASK_OPENCLAW_BIN` | `openclaw` | worker 起動に使う openclaw バイナリ |
-| `SIMPLE_TASK_TIMEOUT_SECS` | `3600` | worker 完了待ちのタイムアウト（秒） |
 | `SIMPLE_TASK_DIR` | `~/.config/simple-task` | タスク保存ディレクトリ（テスト用の上書き） |
 | `XDG_CONFIG_HOME` | `~/.config` | 保存先の基点 |
-
-## ハンドオフの流れ
-
-1. `create_task` が `~/.config/simple-task/<slug>.md` に content を書く
-2. 子プロセスで worker セッションへ通知（**slug のみ**渡す。パスは渡さない）:
-
-   ```
-   openclaw agent --agent worker \
-     --session-key "agent:worker:simple-task:<slug>" \
-     --message "<slug> のタスクを get_task で取得し、その content に従って実行せよ。" \
-     --json
-   ```
-
-3. worker は `get_task(slug)` で content を取得して実行
-4. 子プロセスの `--json` 封筒から `result`（最終発話）を取り出して返す
-
-タイムアウト超過時は子プロセスを kill してエラーを返す（タスクファイルは触らない）。
 
 ## 開発
 
@@ -97,10 +94,10 @@ cargo test
 ```
 
 テストは store の slug 検証（traversal 拒否・長さ境界） / content roundtrip / 重複 / 一覧ソート、
-MCP ツール定義（3 ツール・パス非開示）、handoff の封筒抽出を含む。
+MCP ツール定義（3 ツール・パス非開示・`create_task` の outputSchema が `slug` のみ）を含む。
 
 ## ドキュメント
 
-- `thoughts/simple-task-plan.md` — 実装プラン（正本・v0.4）
-- `thoughts/v04-impl-task.md` — v0.4 実装タスク指示
-- `thoughts/v04-impl-report.md` — v0.4 実装レポート
+- `thoughts/simple-task-plan.md` — 実装プラン（正本・v0.6）
+- `thoughts/v06-impl-task.md` — v0.6 実装タスク指示
+- `thoughts/v06-impl-report.md` — v0.6 実装レポート

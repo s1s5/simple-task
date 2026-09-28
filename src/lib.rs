@@ -1,7 +1,6 @@
 pub mod cli;
 pub mod config;
 pub mod error;
-pub mod handoff;
 pub mod mcp;
 pub mod store;
 
@@ -11,7 +10,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "simple-task",
     version,
-    about = "タスク登録 + worker ハンドオフ MCP"
+    about = "タスク内容ストア MCP（登録・取得・一覧）"
 )]
 pub struct Cli {
     #[command(subcommand)]

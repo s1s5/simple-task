@@ -3,7 +3,6 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::handoff;
 use crate::store;
 
 #[derive(Debug, Clone)]
@@ -22,7 +21,6 @@ struct CreateTaskInput {
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 struct CreateTaskOutput {
     slug: String,
-    result: String,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -50,17 +48,14 @@ impl McpServer {
 
 #[tool_router]
 impl McpServer {
-    #[tool(
-        description = "タスクを登録し、worker エージェントの完了まで待ってその結果を返す（同期）。"
-    )]
+    #[tool(description = "タスク内容をファイルに登録する（実行はしない。即座に返る）。")]
     async fn create_task(
         &self,
         Parameters(input): Parameters<CreateTaskInput>,
     ) -> Result<Json<CreateTaskOutput>, Error> {
         let CreateTaskInput { slug, content } = input;
         store::write(&self.config.dir, &slug, &content)?;
-        let result = handoff::run(&self.config, &slug).await?;
-        Ok(Json(CreateTaskOutput { slug, result }))
+        Ok(Json(CreateTaskOutput { slug }))
     }
 
     #[tool(description = "slug に対応する content を取得する。")]
@@ -141,5 +136,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn create_task_output_schema_is_slug_only() {
+        let tools = McpServer::tool_router().list_all();
+        let create = tools
+            .iter()
+            .find(|t| t.name.as_ref() == "create_task")
+            .expect("create_task tool");
+        let output = serde_json::to_string(&create.output_schema).unwrap_or_default();
+        assert!(output.contains("slug"), "expected slug: {output}");
+        assert!(!output.contains("result"), "result must be gone: {output}");
     }
 }
